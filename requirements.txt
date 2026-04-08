@@ -1,0 +1,17 @@
+# ── Web framework ─────────────────────────────────────────────
+fastapi==0.111.1
+uvicorn[standard]==0.30.1
+
+# ── Neo4j ─────────────────────────────────────────────────────
+neo4j==5.20.0
+
+# ── OpenAI ────────────────────────────────────────────────────
+openai==1.35.3
+
+# ── MinIO (script1 dùng để pull file từ object storage) ───────
+minio==7.2.7
+
+# ── Utilities ─────────────────────────────────────────────────
+python-dotenv==1.0.1
+python-docx==1.1.2          # đọc file .docx cho personality extractor
+requests==2.32.3

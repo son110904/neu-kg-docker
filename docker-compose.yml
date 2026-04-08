@@ -1,0 +1,95 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════
+#  NEU Knowledge Graph — Docker Compose
+#  Services: neo4j  |  api  |  (optional) migration
+# ══════════════════════════════════════════════════════════════
+
+networks:
+  neu_net:
+    driver: bridge
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:
+  neo4j_import:
+  cache_output:        # chia sẻ ./cache/output giữa api và migration job
+
+# ─────────────────────────────────────────────────────────────
+services:
+
+  # ── 1. NEO4J LOCAL ─────────────────────────────────────────
+  neo4j:
+    image: neo4j:5.18-community          # Community edition — miễn phí
+    container_name: neu_neo4j
+    restart: unless-stopped
+    networks: [neu_net]
+    ports:
+      - "7474:7474"   # Neo4j Browser  → http://<server-ip>:7474
+      - "7687:7687"   # Bolt protocol  → bolt://neo4j:7687 (trong Docker network)
+    environment:
+      NEO4J_AUTH: "neo4j/${DB_PASSWORD}"   # lấy từ .env
+      NEO4J_PLUGINS: '["apoc"]'               # cần cho export/import
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_dbms_security_procedures_allowlist:    "apoc.*"
+      NEO4J_dbms_memory_heap_initial__size: "512m"
+      NEO4J_dbms_memory_heap_max__size:     "1g"
+      NEO4J_dbms_memory_pagecache_size:     "512m"
+      # Cho phép import file từ /var/lib/neo4j/import
+      NEO4J_dbms_security_allow__csv__import__from__file__urls: "true"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+      - neo4j_import:/var/lib/neo4j/import
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── 2. FASTAPI APPLICATION ─────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neu_api
+    restart: unless-stopped
+    networks: [neu_net]
+    ports:
+      - "8000:8000"   # API → http://<server-ip>:8000
+    env_file: .env
+    environment:
+      # Override DB_URL để trỏ vào neo4j container nội bộ
+      DB_URL:      "bolt://neo4j:7687"
+      DB_USER:     "neo4j"
+      DB_PASSWORD: "${NEO4J_PASSWORD}"
+    volumes:
+      - cache_output:/app/cache/output   # giữ cache dữ liệu đã extract
+    depends_on:
+      neo4j:
+        condition: service_healthy
+
+  # ── 3. MIGRATION JOB (chạy 1 lần rồi tự dừng) ─────────────
+  # Dùng để re-import dữ liệu từ cache/output vào Neo4j local.
+  # Chạy: docker compose run --rm migration
+  migration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neu_migration
+    networks: [neu_net]
+    env_file: .env
+    environment:
+      DB_URL:      "bolt://neo4j:7687"
+      DB_USER:     "neo4j"
+      DB_PASSWORD: "${NEO4J_PASSWORD}"
+    volumes:
+      - cache_output:/app/cache/output
+    command: ["python", "script2.py"]
+    profiles: ["migration"]             # chỉ chạy khi gọi tường minh
+    depends_on:
+      neo4j:
+        condition: service_healthy
